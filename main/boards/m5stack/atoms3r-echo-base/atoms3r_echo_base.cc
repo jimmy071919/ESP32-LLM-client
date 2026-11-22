@@ -118,6 +118,8 @@ private:
         const char* name;
         int gap_x;
         int gap_y;
+        int memory_width;   // Controller RAM size, used to recompute the gap when flipped
+        int memory_height;
         bool mirror_x;
         bool mirror_y;
         bool swap_xy;
@@ -317,6 +319,8 @@ private:
                 .name = "ST7735",
                 .gap_x = 2,
                 .gap_y = 3,
+                .memory_width = 132,
+                .memory_height = 132,
                 .mirror_x = true,
                 .mirror_y = true,
                 .swap_xy = false,
@@ -329,6 +333,8 @@ private:
             .name = "GC9107",
             .gap_x = DISPLAY_OFFSET_X,
             .gap_y = DISPLAY_OFFSET_Y,
+            .memory_width = 128,
+            .memory_height = 160,
             .mirror_x = DISPLAY_MIRROR_X,
             .mirror_y = DISPLAY_MIRROR_Y,
             .swap_xy = DISPLAY_SWAP_XY,
@@ -336,19 +342,31 @@ private:
         };
     }
 
+    LcdPanelConfig ApplyDisplayRotation(LcdPanelConfig config) {
+#if CONFIG_ATOMS3R_ECHO_BASE_DISPLAY_ROTATE_180
+        // Rotating 180 degrees mirrors both axes, which moves the visible window
+        // to the opposite side of the controller RAM.
+        config.mirror_x = !config.mirror_x;
+        config.mirror_y = !config.mirror_y;
+        config.gap_x = config.memory_width - DISPLAY_WIDTH - config.gap_x;
+        config.gap_y = config.memory_height - DISPLAY_HEIGHT - config.gap_y;
+#endif
+        return config;
+    }
+
     LcdPanelConfig DetectLcdPanel() {
         uint32_t id = ReadLcdPanelId();
         if ((id & 0xFFFF) == 0x7683 || (id & 0xFFFF) == 0x897C) {
             ESP_LOGI(TAG, "Detected ST7735 LCD panel");
-            return GetLcdPanelConfig(LcdPanelType::kSt7735);
+            return ApplyDisplayRotation(GetLcdPanelConfig(LcdPanelType::kSt7735));
         }
         if ((id & 0xFFFFFF) == 0x079100) {
             ESP_LOGI(TAG, "Detected GC9107 LCD panel");
-            return GetLcdPanelConfig(LcdPanelType::kGc9107);
+            return ApplyDisplayRotation(GetLcdPanelConfig(LcdPanelType::kGc9107));
         }
 
         ESP_LOGW(TAG, "Unknown LCD panel ID 0x%08" PRIx32 ", fallback to GC9107", id);
-        return GetLcdPanelConfig(LcdPanelType::kGc9107);
+        return ApplyDisplayRotation(GetLcdPanelConfig(LcdPanelType::kGc9107));
     }
 
     void InitializeLcdDisplay(const LcdPanelConfig& config) {

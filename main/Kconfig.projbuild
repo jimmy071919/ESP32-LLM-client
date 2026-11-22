@@ -730,6 +730,14 @@ choice ESP32_S3_LCD_EV_BOARD_VERSION
         bool "Espressif ESP32-S3-LCD-EV-Board-MB v1.5"
 endchoice
 
+config ATOMS3R_ECHO_BASE_DISPLAY_ROTATE_180
+    bool "Rotate AtomS3R display 180 degrees"
+    depends on BOARD_TYPE_M5STACK_ATOM_S3R_ECHO_BASE
+    default n
+    help
+        Show the AtomS3R screen upside down, for when the device is mounted
+        inverted.
+
 
 choice WK_ESP32S3_DEV_DISPLAY_TYPE
     depends on BOARD_TYPE_WK_ESP32S3_DEV
