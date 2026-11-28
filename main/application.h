@@ -14,12 +14,15 @@
 #include <string>
 #include <vector>
 
+#include <cJSON.h>
+
 #include "audio_service.h"
 #include "device_state.h"
 #include "device_state_machine.h"
 #include "notify/notify_player.h"
 #include "ota.h"
 #include "protocol.h"
+#include "protocols/notify_channel.h"
 
 // Main event bits
 #define MAIN_EVENT_SCHEDULE (1 << 0)
@@ -115,6 +118,7 @@ public:
     void SetAecMode(AecMode mode);
     AecMode GetAecMode() const { return aec_mode_; }
     void PlaySound(const std::string_view& sound);
+    void HandleNotifyMessage(const cJSON* root);
     AudioService& GetAudioService() { return audio_service_; }
 
     /**
@@ -141,6 +145,7 @@ private:
     NotifyPlayer notify_player_;
     uint32_t notification_playback_id_ = 0;
     std::unique_ptr<Ota> ota_;
+    NotifyChannel notify_channel_;
 
     std::function<void(const std::string&)> mcp_broadcast_callback_;
 

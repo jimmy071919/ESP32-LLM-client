@@ -10,6 +10,7 @@
 #include "board.h"
 #include "http.h"
 #include "ogg_demuxer.h"
+#include "system_info.h"
 
 namespace {
 constexpr int kHttpTimeoutMs = 5000;
@@ -186,6 +187,7 @@ void NotifyPlayer::WorkerTask() {
         http->SetTimeout(kHttpTimeoutMs);
         http->SetHeader("Accept", "audio/ogg, application/ogg");
         http->SetHeader("Accept-Encoding", "identity");
+        http->SetHeader("User-Agent", SystemInfo::GetUserAgent());
         auto opened = http->Open("GET", audio_url);
         if (opened) {
             auto status = http->GetStatusCode();
