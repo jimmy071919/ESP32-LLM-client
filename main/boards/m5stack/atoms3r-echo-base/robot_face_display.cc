@@ -6,6 +6,7 @@
 #include <esp_random.h>
 #include <material_symbols.h>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 #define TAG "RobotFaceDisplay"
@@ -15,17 +16,23 @@ namespace {
 // Geometry tuned for the 128x128 AtomS3R screen.
 constexpr int kFaceWidth = 100;
 constexpr int kFaceHeight = 64;
-constexpr int kEyeOffsetX = 30;
-constexpr int kEyeOffsetY = -10;
+constexpr int kEyeOffsetX = 26;
+constexpr int kEyeOffsetY = -12;
 constexpr int kMouthOffsetY = 12;
-constexpr int kStroke = 4;
+constexpr int kStroke = 3;
 
-constexpr int kEyeDot = 10;
-constexpr int kEyeBigDot = 14;
+constexpr int kEyeDot = 8;
+constexpr int kEyeBigDot = 12;
 constexpr int kEyeSmallDot = 6;
 
-constexpr uint32_t kFeatureColor = 0xFFFFFF;
+constexpr uint32_t kFeatureColor = 0x514650;
+constexpr uint32_t kBackgroundColor = 0xB88AD3;
 constexpr const char* kFaceThemeName = "dark";
+constexpr lv_point_precise_t kMouthPoints[] = {
+    {2, 2},   {10, 5},  {18, 8},  {26, 10}, {34, 12}, {42, 13},
+    {50, 14}, {58, 15}, {66, 15}, {74, 15}, {82, 15}, {90, 15},
+};
+constexpr lv_point_precise_t kCrossPoints[2][2] = {{{1, 1}, {11, 11}}, {{11, 1}, {1, 11}}};
 
 // Anti image-retention: shift the whole face by a few pixels periodically so
 // the same LCD pixels are not lit by a static image for hours.
@@ -39,7 +46,6 @@ RobotFaceDisplay::RobotFaceDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_p
                                    bool mirror_y, bool swap_xy)
     : SpiLcdDisplay(panel_io, panel, width, height, offset_x, offset_y, mirror_x, mirror_y,
                     swap_xy) {
-    // The face is white-on-dark; always use the dark theme.
     auto dark_theme = LvglThemeManager::GetInstance().GetTheme(kFaceThemeName);
     if (dark_theme != nullptr) {
         current_theme_ = dark_theme;
@@ -49,6 +55,33 @@ RobotFaceDisplay::RobotFaceDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_p
 void RobotFaceDisplay::SetTheme(Theme* theme) {
     auto dark_theme = LvglThemeManager::GetInstance().GetTheme(kFaceThemeName);
     LcdDisplay::SetTheme(dark_theme != nullptr ? dark_theme : theme);
+    DisplayLockGuard lock(this);
+    if (lock) {
+        ApplyDittoColors();
+    }
+}
+
+void RobotFaceDisplay::ApplyDittoColors() {
+    const auto background = lv_color_hex(kBackgroundColor);
+    const auto foreground = lv_color_hex(kFeatureColor);
+    lv_obj_set_style_bg_color(lv_screen_active(), background, 0);
+    if (container_ != nullptr) {
+        lv_obj_set_style_bg_image_src(container_, nullptr, 0);
+        lv_obj_set_style_bg_color(container_, background, 0);
+    }
+    if (top_bar_ != nullptr) {
+        lv_obj_set_style_bg_color(top_bar_, background, 0);
+    }
+    if (bottom_bar_ != nullptr) {
+        lv_obj_set_style_bg_color(bottom_bar_, background, 0);
+    }
+    lv_obj_t* labels[] = {network_label_, status_label_, notification_label_, mute_label_,
+                          battery_label_, emoji_label_,  chat_message_label_};
+    for (auto label : labels) {
+        if (label != nullptr) {
+            lv_obj_set_style_text_color(label, foreground, 0);
+        }
+    }
 }
 
 lv_obj_t* RobotFaceDisplay::CreateArc(lv_obj_t* parent, int size, int width) {
@@ -72,7 +105,12 @@ void RobotFaceDisplay::SetupUI() {
     LcdDisplay::SetupUI();
 
     DisplayLockGuard lock(this);
+    if (!lock) {
+        return;
+    }
+    ApplyDittoColors();
     lv_obj_t* parent = emoji_box_ != nullptr ? emoji_box_ : lv_screen_active();
+    lv_obj_add_flag(parent, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
 
     face_ = lv_obj_create(parent);
     lv_obj_set_size(face_, kFaceWidth, kFaceHeight);
@@ -93,6 +131,17 @@ void RobotFaceDisplay::SetupUI() {
         lv_obj_remove_flag(eye_dot_[i], LV_OBJ_FLAG_SCROLLABLE);
 
         eye_arc_[i] = CreateArc(face_, 16, 3);
+        for (int j = 0; j < 2; ++j) {
+            dizzy_eye_[i][j] = lv_line_create(face_);
+            lv_obj_set_size(dizzy_eye_[i][j], 13, 13);
+            lv_line_set_points(dizzy_eye_[i][j], kCrossPoints[j], 2);
+            lv_obj_set_style_line_color(dizzy_eye_[i][j], lv_color_hex(kFeatureColor), 0);
+            lv_obj_set_style_line_width(dizzy_eye_[i][j], kStroke, 0);
+            lv_obj_set_style_line_rounded(dizzy_eye_[i][j], true, 0);
+            lv_obj_align(dizzy_eye_[i][j], LV_ALIGN_CENTER, i == 0 ? -kEyeOffsetX : kEyeOffsetX,
+                         kEyeOffsetY + (i == 0 ? 0 : 5));
+            lv_obj_add_flag(dizzy_eye_[i][j], LV_OBJ_FLAG_HIDDEN);
+        }
     }
 
     mouth_bar_ = lv_obj_create(face_);
@@ -103,6 +152,15 @@ void RobotFaceDisplay::SetupUI() {
     lv_obj_remove_flag(mouth_bar_, LV_OBJ_FLAG_SCROLLABLE);
 
     mouth_arc_ = CreateArc(face_, 40, kStroke);
+    mouth_curve_ = lv_line_create(face_);
+    lv_obj_set_size(mouth_curve_, 93, 18);
+    std::copy(std::begin(kMouthPoints), std::end(kMouthPoints), mouth_points_);
+    lv_line_set_points(mouth_curve_, mouth_points_,
+                       sizeof(mouth_points_) / sizeof(mouth_points_[0]));
+    lv_obj_set_style_line_color(mouth_curve_, lv_color_hex(kFeatureColor), 0);
+    lv_obj_set_style_line_width(mouth_curve_, kStroke, 0);
+    lv_obj_set_style_line_rounded(mouth_curve_, true, 0);
+    lv_obj_align(mouth_curve_, LV_ALIGN_CENTER, 0, kMouthOffsetY);
 
     if (emoji_label_ != nullptr) {
         lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
@@ -111,7 +169,7 @@ void RobotFaceDisplay::SetupUI() {
         lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
     }
 
-    ApplyExpression({EyeShape::kDot, EyeShape::kDot, MouthShape::kLine});
+    ApplyExpression({EyeShape::kDot, EyeShape::kDot, MouthShape::kSmile});
 
     drift_timer_ = lv_timer_create(DriftTimerCallback, kDriftPeriodMs, this);
 }
@@ -134,8 +192,8 @@ bool RobotFaceDisplay::LookupExpression(const char* emotion, Expression& express
         Expression expression;
     };
     static const Entry kEntries[] = {
-        {"neutral", {EyeShape::kDot, EyeShape::kDot, MouthShape::kLine}},
-        {"robot_2", {EyeShape::kDot, EyeShape::kDot, MouthShape::kLine}},
+        {"neutral", {EyeShape::kDot, EyeShape::kDot, MouthShape::kSmile}},
+        {"robot_2", {EyeShape::kDot, EyeShape::kDot, MouthShape::kSmile}},
         {"relaxed", {EyeShape::kDot, EyeShape::kDot, MouthShape::kLine}},
         {"confident", {EyeShape::kDot, EyeShape::kDot, MouthShape::kLine}},
         {"cool", {EyeShape::kDot, EyeShape::kDot, MouthShape::kLine}},
@@ -168,13 +226,14 @@ bool RobotFaceDisplay::LookupExpression(const char* emotion, Expression& express
 
 void RobotFaceDisplay::ApplyEye(int index, EyeShape shape) {
     const int x = index == 0 ? -kEyeOffsetX : kEyeOffsetX;
+    const int y = kEyeOffsetY + (index == 0 ? 0 : 5);
     lv_obj_t* dot = eye_dot_[index];
     lv_obj_t* arc = eye_arc_[index];
 
     if (shape == EyeShape::kHappy) {
         // Upper half arc reads as a closed, smiling "^" eye.
         lv_arc_set_angles(arc, 200, 340);
-        lv_obj_align(arc, LV_ALIGN_CENTER, x, kEyeOffsetY + 5);
+        lv_obj_align(arc, LV_ALIGN_CENTER, x, y + 5);
         lv_obj_remove_flag(arc, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(dot, LV_OBJ_FLAG_HIDDEN);
         return;
@@ -198,21 +257,23 @@ void RobotFaceDisplay::ApplyEye(int index, EyeShape shape) {
             break;
     }
     lv_obj_set_size(dot, w, h);
-    lv_obj_align(dot, LV_ALIGN_CENTER, x, kEyeOffsetY);
+    lv_obj_align(dot, LV_ALIGN_CENTER, x, y);
     lv_obj_remove_flag(dot, LV_OBJ_FLAG_HIDDEN);
 }
 
 void RobotFaceDisplay::ApplyMouth(MouthShape shape) {
+    if (shape == MouthShape::kSmile) {
+        lv_obj_add_flag(mouth_arc_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(mouth_bar_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(mouth_curve_, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_obj_add_flag(mouth_curve_, LV_OBJ_FLAG_HIDDEN);
     switch (shape) {
-        case MouthShape::kSmile:
         case MouthShape::kBigSmile: {
-            const int size = shape == MouthShape::kBigSmile ? 44 : 40;
+            const int size = 80;
             lv_obj_set_size(mouth_arc_, size, size);
-            if (shape == MouthShape::kBigSmile) {
-                lv_arc_set_angles(mouth_arc_, 20, 160);
-            } else {
-                lv_arc_set_angles(mouth_arc_, 40, 140);
-            }
+            lv_arc_set_angles(mouth_arc_, 45, 135);
             // Place the bottom of the arc around the neutral mouth line.
             lv_obj_align(mouth_arc_, LV_ALIGN_CENTER, 0, kMouthOffsetY - size / 2 + 4);
             lv_obj_remove_flag(mouth_arc_, LV_OBJ_FLAG_HIDDEN);
@@ -248,48 +309,51 @@ void RobotFaceDisplay::ApplyMouth(MouthShape shape) {
 }
 
 void RobotFaceDisplay::ApplyExpression(const Expression& expression) {
-    StopBlink();
     ApplyEye(0, expression.left_eye);
     ApplyEye(1, expression.right_eye);
     ApplyMouth(expression.mouth);
+}
 
-    auto is_dot = [](EyeShape s) {
-        return s == EyeShape::kDot || s == EyeShape::kBigDot || s == EyeShape::kSmallDot;
-    };
-    if (is_dot(expression.left_eye) && is_dot(expression.right_eye)) {
-        StartBlink();
+void RobotFaceDisplay::SetMotion(float x, float y, bool dizzy) {
+    DisplayLockGuard lock(this);
+    if (!lock || face_ == nullptr) {
+        return;
     }
-}
-
-void RobotFaceDisplay::BlinkAnimCallback(void* var, int32_t value) {
-    auto self = static_cast<RobotFaceDisplay*>(var);
-    for (int i = 0; i < 2; i++) {
-        lv_obj_t* dot = self->eye_dot_[i];
-        int32_t base = lv_obj_get_style_width(dot, LV_PART_MAIN);
-        lv_obj_set_height(dot, std::max<int32_t>(2, base * value / 100));
+    motion_x_ += (std::clamp(x * 1.4f, -1.0f, 1.0f) - motion_x_) * 0.16f;
+    motion_y_ += (std::clamp(y * 1.4f, -1.0f, 1.0f) - motion_y_) * 0.16f;
+    const int dx = static_cast<int>(std::round(motion_x_ * 33));
+    const int dy = static_cast<int>(std::round(motion_y_ * 27));
+    lv_obj_set_style_translate_x(face_, dx, 0);
+    lv_obj_set_style_translate_y(face_, dy, 0);
+    for (int i = 0; i < 2; ++i) {
+        const int stretch = static_cast<int>(std::round(motion_x_ * (i == 0 ? -18 : 18)));
+        lv_obj_set_style_translate_y(eye_dot_[i], stretch, 0);
+        lv_obj_set_style_translate_y(eye_arc_[i], stretch, 0);
+        for (auto eye : dizzy_eye_[i]) {
+            lv_obj_set_style_translate_y(eye, stretch, 0);
+        }
     }
-}
-
-void RobotFaceDisplay::StartBlink() {
-    lv_anim_t a;
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, this);
-    lv_anim_set_exec_cb(&a, BlinkAnimCallback);
-    lv_anim_set_values(&a, 100, 0);
-    lv_anim_set_duration(&a, 80);
-    lv_anim_set_reverse_duration(&a, 120);
-    lv_anim_set_delay(&a, 2000);
-    lv_anim_set_repeat_delay(&a, 3800);
-    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_start(&a);
-}
-
-void RobotFaceDisplay::StopBlink() {
-    lv_anim_delete(this, BlinkAnimCallback);
-    // Restore round eyes in case the animation stopped mid-blink.
-    for (int i = 0; i < 2; i++) {
-        if (eye_dot_[i] != nullptr) {
-            lv_obj_set_height(eye_dot_[i], lv_obj_get_style_width(eye_dot_[i], LV_PART_MAIN));
+    for (size_t i = 0; i < std::size(mouth_points_); ++i) {
+        mouth_points_[i] = kMouthPoints[i];
+        mouth_points_[i].y +=
+            static_cast<int>(std::round(motion_x_ * (static_cast<float>(i) - 5.5f) * 0.6f));
+    }
+    lv_obj_invalidate(mouth_curve_);
+    if (dizzy_ != dizzy) {
+        dizzy_ = dizzy;
+        ApplyExpression(expression_);
+        for (int i = 0; i < 2; ++i) {
+            if (dizzy_) {
+                lv_obj_add_flag(eye_dot_[i], LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(eye_arc_[i], LV_OBJ_FLAG_HIDDEN);
+            }
+            for (auto eye : dizzy_eye_[i]) {
+                if (dizzy_) {
+                    lv_obj_remove_flag(eye, LV_OBJ_FLAG_HIDDEN);
+                } else {
+                    lv_obj_add_flag(eye, LV_OBJ_FLAG_HIDDEN);
+                }
+            }
         }
     }
 }
@@ -311,7 +375,6 @@ void RobotFaceDisplay::SetEmotion(const char* emotion) {
         {
             DisplayLockGuard lock(this);
             if (face_ != nullptr) {
-                StopBlink();
                 lv_obj_add_flag(face_, LV_OBJ_FLAG_HIDDEN);
             }
         }
@@ -335,5 +398,8 @@ void RobotFaceDisplay::SetEmotion(const char* emotion) {
         lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
     }
     lv_obj_remove_flag(face_, LV_OBJ_FLAG_HIDDEN);
-    ApplyExpression(expression);
+    expression_ = expression;
+    if (!dizzy_) {
+        ApplyExpression(expression_);
+    }
 }

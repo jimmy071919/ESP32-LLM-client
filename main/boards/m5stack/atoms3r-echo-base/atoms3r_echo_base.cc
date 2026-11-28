@@ -1,53 +1,53 @@
-#include "wifi_board.h"
-#include "codecs/es8311_audio_codec.h"
-#include "display/lcd_display.h"
-#include "robot_face_display.h"
 #include "application.h"
-#include "button.h"
-#include "config.h"
-#include "i2c_device.h"
 #include "assets/lang_config.h"
+#include "bmi270_api.h"
+#include "button.h"
+#include "codecs/es8311_audio_codec.h"
+#include "config.h"
+#include "display/lcd_display.h"
+#include "i2c_device.h"
+#include "robot_face_display.h"
+#include "wifi_board.h"
 
 #include <driver/gpio.h>
-#include <esp_log.h>
 #include <driver/i2c_master.h>
 #include <driver/spi_master.h>
-#include <esp_lcd_panel_vendor.h>
+#include <esp_lcd_gc9a01.h>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
-#include <esp_lcd_gc9a01.h>
+#include <esp_lcd_panel_vendor.h>
+#include <esp_log.h>
 #include <inttypes.h>
+#include <cmath>
 
 #define TAG "AtomS3R+EchoBase"
 
-
-#define PI4IOE_ADDR          0x43
-#define PI4IOE_REG_CTRL      0x00
-#define PI4IOE_REG_IO_PP     0x07
-#define PI4IOE_REG_IO_DIR    0x03
-#define PI4IOE_REG_IO_OUT    0x05
+#define PI4IOE_ADDR 0x43
+#define PI4IOE_REG_CTRL 0x00
+#define PI4IOE_REG_IO_PP 0x07
+#define PI4IOE_REG_IO_DIR 0x03
+#define PI4IOE_REG_IO_OUT 0x05
 #define PI4IOE_REG_IO_PULLUP 0x0D
 
 class Pi4ioe : public I2cDevice {
 public:
     Pi4ioe(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : I2cDevice(i2c_bus, addr) {
-        WriteReg(PI4IOE_REG_IO_PP, 0x00); // Set to high-impedance
-        WriteReg(PI4IOE_REG_IO_PULLUP, 0xFF); // Enable pull-up
-        WriteReg(PI4IOE_REG_IO_DIR, 0x6E); // Set input=0, output=1
-        WriteReg(PI4IOE_REG_IO_OUT, 0xFF); // Set outputs to 1
+        WriteReg(PI4IOE_REG_IO_PP, 0x00);      // Set to high-impedance
+        WriteReg(PI4IOE_REG_IO_PULLUP, 0xFF);  // Enable pull-up
+        WriteReg(PI4IOE_REG_IO_DIR, 0x6E);     // Set input=0, output=1
+        WriteReg(PI4IOE_REG_IO_OUT, 0xFF);     // Set outputs to 1
     }
 
-    void SetSpeakerMute(bool mute) {
-        WriteReg(PI4IOE_REG_IO_OUT, mute ? 0x00 : 0xFF);
-    }
+    void SetSpeakerMute(bool mute) { WriteReg(PI4IOE_REG_IO_OUT, mute ? 0x00 : 0xFF); }
 };
 
 class Lp5562 : public I2cDevice {
 public:
     Lp5562(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : I2cDevice(i2c_bus, addr) {
-        WriteReg(0x00, 0B01000000); // Set chip_en to 1
-        WriteReg(0x08, 0B00000001); // Enable internal clock
-        WriteReg(0x70, 0B00000000); // Configure all LED outputs to be controlled from I2C registers
+        WriteReg(0x00, 0B01000000);  // Set chip_en to 1
+        WriteReg(0x08, 0B00000001);  // Enable internal clock
+        WriteReg(0x70,
+                 0B00000000);  // Configure all LED outputs to be controlled from I2C registers
 
         // PWM clock frequency 558 Hz
         auto data = ReadReg(0x08);
@@ -98,13 +98,13 @@ static const gc9a01_lcd_init_cmd_t gc9107_lcd_init_cmds[] = {
     {0xc6, (uint8_t[]){0x30}, 1, 0},
     {0xc7, (uint8_t[]){0x18}, 1, 0},
     {0xf0,
-    (uint8_t[]){0x1f, 0x28, 0x04, 0x3e, 0x2a, 0x2e, 0x20, 0x00, 0x0c, 0x06,
-                0x00, 0x1c, 0x1f, 0x0f},
-    14, 0},
+     (uint8_t[]){0x1f, 0x28, 0x04, 0x3e, 0x2a, 0x2e, 0x20, 0x00, 0x0c, 0x06, 0x00, 0x1c, 0x1f,
+                 0x0f},
+     14, 0},
     {0xf1,
-    (uint8_t[]){0x00, 0x2d, 0x2f, 0x3c, 0x6f, 0x1c, 0x0b, 0x00, 0x00, 0x00,
-                0x07, 0x0d, 0x11, 0x0f},
-    14, 0},
+     (uint8_t[]){0x00, 0x2d, 0x2f, 0x3c, 0x6f, 0x1c, 0x0b, 0x00, 0x00, 0x00, 0x07, 0x0d, 0x11,
+                 0x0f},
+     14, 0},
 };
 
 class AtomS3rEchoBaseBoard : public WifiBoard {
@@ -119,7 +119,7 @@ private:
         const char* name;
         int gap_x;
         int gap_y;
-        int memory_width;   // Controller RAM size, used to recompute the gap when flipped
+        int memory_width;  // Controller RAM size, used to recompute the gap when flipped
         int memory_height;
         bool mirror_x;
         bool mirror_y;
@@ -135,6 +135,82 @@ private:
     Button boot_button_;
     bool is_echo_base_connected_ = false;
 
+    static void MotionTask(void* arg) {
+        auto* self = static_cast<AtomS3rEchoBaseBoard*>(arg);
+        bmi270_handle_t sensor = nullptr;
+        esp_err_t result = bmi270_sensor_create_from_master_bus(
+            self->i2c_bus_internal_, &sensor, bmi270_config_file,
+            BMI2_GYRO_CROSS_SENS_ENABLE | BMI2_CRT_RTOSK_ENABLE);
+        if (result != ESP_OK) {
+            ESP_LOGW(TAG, "BMI270 initialization failed: %s", esp_err_to_name(result));
+            if (sensor != nullptr) {
+                bmi270_sensor_del(&sensor);
+            }
+            vTaskDelete(nullptr);
+            return;
+        }
+        bmi2_sens_config config = {};
+        config.type = BMI2_ACCEL;
+        const uint8_t sensors[] = {BMI2_ACCEL};
+        if (bmi2_set_adv_power_save(BMI2_DISABLE, sensor) != BMI2_OK ||
+            bmi2_get_sensor_config(&config, 1, sensor) != BMI2_OK) {
+            ESP_LOGW(TAG, "BMI270 configuration failed");
+            bmi270_sensor_del(&sensor);
+            vTaskDelete(nullptr);
+            return;
+        }
+        config.cfg.acc.range = BMI2_ACC_RANGE_4G;
+        config.cfg.acc.odr = BMI2_ACC_ODR_100HZ;
+        config.cfg.acc.bwp = BMI2_ACC_NORMAL_AVG4;
+        config.cfg.acc.filter_perf = BMI2_PERF_OPT_MODE;
+        if (bmi2_set_sensor_config(&config, 1, sensor) != BMI2_OK ||
+            bmi2_sensor_enable(sensors, 1, sensor) != BMI2_OK) {
+            ESP_LOGW(TAG, "BMI270 accelerometer start failed");
+            bmi270_sensor_del(&sensor);
+            vTaskDelete(nullptr);
+            return;
+        }
+        auto* face = static_cast<RobotFaceDisplay*>(self->display_);
+        float filtered_x = 0, filtered_y = 0, filtered_z = 0;
+        bool initialized = false;
+        int64_t dizzy_until = 0;
+        int shake_score = 0;
+        while (true) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+            bmi2_sens_data data = {};
+            if (bmi2_get_sensor_data(&data, sensor) != BMI2_OK || !(data.status & BMI2_DRDY_ACC)) {
+                continue;
+            }
+            const float x = data.acc.x / 8192.0f;
+            const float y = data.acc.y / 8192.0f;
+            const float z = data.acc.z / 8192.0f;
+            if (!initialized) {
+                filtered_x = x;
+                filtered_y = y;
+                filtered_z = z;
+                initialized = true;
+                ESP_LOGI(TAG, "BMI270 accelerometer active: x=%d y=%d z=%d", data.acc.x, data.acc.y,
+                         data.acc.z);
+            }
+            const float delta_x = x - filtered_x;
+            const float delta_y = y - filtered_y;
+            const float delta_z = z - filtered_z;
+            filtered_x += delta_x * 0.12f;
+            filtered_y += delta_y * 0.12f;
+            filtered_z += delta_z * 0.12f;
+            const float movement =
+                std::sqrt(delta_x * delta_x + delta_y * delta_y + delta_z * delta_z);
+            shake_score = movement > 0.65f ? shake_score + 2 : shake_score - 1;
+            if (shake_score < 0)
+                shake_score = 0;
+            if (shake_score >= 4) {
+                dizzy_until = esp_timer_get_time() + 2500000;
+                shake_score = 0;
+            }
+            face->SetMotion(filtered_x, filtered_y, esp_timer_get_time() < dizzy_until);
+        }
+    }
+
     void InitializeI2c() {
         // Initialize I2C peripheral
         i2c_master_bus_config_t i2c_bus_cfg = {
@@ -145,12 +221,13 @@ private:
             .glitch_ignore_cnt = 7,
             .intr_priority = 0,
             .trans_queue_depth = 0,
-            .flags = {
-                .enable_internal_pullup = 1,
-            },
+            .flags =
+                {
+                    .enable_internal_pullup = 1,
+                },
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
-        
+
         i2c_bus_cfg.i2c_port = I2C_NUM_0;
         i2c_bus_cfg.sda_io_num = GPIO_NUM_45;
         i2c_bus_cfg.scl_io_num = GPIO_NUM_0;
@@ -190,21 +267,21 @@ private:
         if (is_echo_base_connected_) {
             return;
         }
-        
+
         // Pop error page
         InitializeLp5562();
         InitializeSpi();
         InitializeLcdDisplay(DetectLcdPanel());
         InitializeButtons();
         GetBacklight()->SetBrightness(100);
-        
+
         // Ensure UI is set up before displaying error
         display_->SetupUI();
-        
+
         display_->SetStatus(Lang::Strings::ERROR);
         display_->SetEmotion("warning");
         display_->SetChatMessage("system", "Echo Base\nnot connected");
-        
+
         while (1) {
             ESP_LOGE(TAG, "Atomic Echo Base is disconnected");
             vTaskDelay(pdMS_TO_TICKS(1000));
@@ -290,7 +367,7 @@ private:
         ret = spi_device_polling_transmit(spi, &wake);
 
         spi_transaction_t trans = {};
-        trans.cmd = 0x04; // RDDID
+        trans.cmd = 0x04;  // RDDID
         trans.rxlength = 32;
         trans.flags = SPI_TRANS_USE_RXDATA;
         gpio_set_level(LCD_CS_GPIO, 0);
@@ -384,13 +461,13 @@ private:
         io_config.lcd_cmd_bits = 8;
         io_config.lcd_param_bits = 8;
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI3_HOST, &io_config, &io_handle));
-    
+
         ESP_LOGI(TAG, "Install %s panel driver", config.name);
         esp_lcd_panel_handle_t panel_handle = nullptr;
         esp_lcd_panel_dev_config_t panel_config = {};
-        panel_config.reset_gpio_num = LCD_RST_GPIO; // Set to -1 if not use
+        panel_config.reset_gpio_num = LCD_RST_GPIO;  // Set to -1 if not use
         panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
-        panel_config.bits_per_pixel = 16; // Implemented by LCD command `3Ah` (16/18)
+        panel_config.bits_per_pixel = 16;  // Implemented by LCD command `3Ah` (16/18)
 
         if (config.type == LcdPanelType::kGc9107) {
             gc9a01_vendor_config_t gc9107_vendor_config = {
@@ -411,8 +488,8 @@ private:
         ESP_ERROR_CHECK(esp_lcd_panel_set_gap(panel_handle, config.gap_x, config.gap_y));
         ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
 
-        display_ = new RobotFaceDisplay(io_handle, panel_handle,
-                                    DISPLAY_WIDTH, DISPLAY_HEIGHT, 0, 0, config.mirror_x, config.mirror_y, config.swap_xy);
+        display_ = new RobotFaceDisplay(io_handle, panel_handle, DISPLAY_WIDTH, DISPLAY_HEIGHT, 0,
+                                        0, config.mirror_x, config.mirror_y, config.swap_xy);
     }
 
     void InitializeButtons() {
@@ -435,32 +512,24 @@ public:
         InitializeLp5562();
         InitializeSpi();
         InitializeLcdDisplay(DetectLcdPanel());
+        if (xTaskCreate(MotionTask, "face_motion", 6144, this, 3, nullptr) != pdPASS) {
+            ESP_LOGW(TAG, "Unable to start motion task");
+        }
         InitializeButtons();
         GetBacklight()->RestoreBrightness();
     }
 
     virtual AudioCodec* GetAudioCodec() override {
         static Es8311AudioCodec audio_codec(
-            i2c_bus_, 
-            I2C_NUM_1, 
-            AUDIO_INPUT_SAMPLE_RATE, 
-            AUDIO_OUTPUT_SAMPLE_RATE,
-            AUDIO_I2S_GPIO_MCLK, 
-            AUDIO_I2S_GPIO_BCLK, 
-            AUDIO_I2S_GPIO_WS, 
-            AUDIO_I2S_GPIO_DOUT, 
-            AUDIO_I2S_GPIO_DIN,
-            AUDIO_CODEC_GPIO_PA, 
-            AUDIO_CODEC_ES8311_ADDR, 
-            false);
+            i2c_bus_, I2C_NUM_1, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
+            AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT,
+            AUDIO_I2S_GPIO_DIN, AUDIO_CODEC_GPIO_PA, AUDIO_CODEC_ES8311_ADDR, false);
         return &audio_codec;
     }
 
-    virtual Display* GetDisplay() override {
-        return display_;
-    }
+    virtual Display* GetDisplay() override { return display_; }
 
-    virtual Backlight *GetBacklight() override {
+    virtual Backlight* GetBacklight() override {
         static CustomBacklight backlight(lp5562_);
         return &backlight;
     }

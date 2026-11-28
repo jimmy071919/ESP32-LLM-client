@@ -14,6 +14,7 @@ public:
     void SetupUI() override;
     void SetEmotion(const char* emotion) override;
     void SetTheme(Theme* theme) override;
+    void SetMotion(float x, float y, bool dizzy);
 
 private:
     enum class EyeShape { kDot, kBigDot, kSmallDot, kHappy, kClosed };
@@ -30,18 +31,23 @@ private:
     lv_obj_t* eye_arc_[2] = {nullptr, nullptr};
     lv_obj_t* mouth_bar_ = nullptr;
     lv_obj_t* mouth_arc_ = nullptr;
+    lv_obj_t* mouth_curve_ = nullptr;
+    lv_obj_t* dizzy_eye_[2][2] = {};
+    lv_point_precise_t mouth_points_[12] = {};
+    Expression expression_ = {EyeShape::kDot, EyeShape::kDot, MouthShape::kSmile};
+    bool dizzy_ = false;
+    float motion_x_ = 0;
+    float motion_y_ = 0;
     lv_timer_t* drift_timer_ = nullptr;
 
     static bool LookupExpression(const char* emotion, Expression& expression);
-    static void BlinkAnimCallback(void* var, int32_t value);
     static void DriftTimerCallback(lv_timer_t* timer);
 
     lv_obj_t* CreateArc(lv_obj_t* parent, int size, int width);
+    void ApplyDittoColors();
     void ApplyEye(int index, EyeShape shape);
     void ApplyMouth(MouthShape shape);
     void ApplyExpression(const Expression& expression);
-    void StartBlink();
-    void StopBlink();
 };
 
 #endif  // ATOMS3R_ROBOT_FACE_DISPLAY_H
