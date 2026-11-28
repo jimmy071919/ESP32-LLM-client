@@ -607,39 +607,7 @@ void Application::InitializeProtocol() {
             return;
         }
         if (strcmp(type->valuestring, "notify") == 0) {
-            auto audio_url = cJSON_GetObjectItem(root, "audio_url");
-            if (!cJSON_IsString(audio_url) || audio_url->valuestring[0] == '\0') {
-                ESP_LOGW(TAG, "Notify message requires audio_url");
-                return;
-            }
-
-            std::vector<NotifySubtitle> subtitles;
-            auto subtitles_json = cJSON_GetObjectItem(root, "subtitles");
-            if (subtitles_json != nullptr && !cJSON_IsArray(subtitles_json)) {
-                ESP_LOGW(TAG, "Notify subtitles must be an array");
-                return;
-            }
-            if (cJSON_IsArray(subtitles_json)) {
-                cJSON* item = nullptr;
-                cJSON_ArrayForEach (item, subtitles_json) {
-                    auto start_ms = cJSON_GetObjectItem(item, "start_ms");
-                    auto text = cJSON_GetObjectItem(item, "text");
-                    if (!cJSON_IsNumber(start_ms) || start_ms->valuedouble < 0 ||
-                        start_ms->valuedouble > std::numeric_limits<uint32_t>::max() ||
-                        !cJSON_IsString(text)) {
-                        ESP_LOGW(TAG, "Ignoring invalid notify subtitle");
-                        continue;
-                    }
-                    subtitles.push_back(
-                        {.start_ms = static_cast<uint32_t>(start_ms->valuedouble),
-                         .text = ConvertToTraditionalForDisplay(text->valuestring)});
-                }
-            }
-
-            Schedule([this, url = std::string(audio_url->valuestring),
-                      subtitles = std::move(subtitles)]() mutable {
-                StartNotification(std::move(url), std::move(subtitles));
-            });
+            HandleNotifyMessage(root);
         } else if (strcmp(type->valuestring, "tts") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
             if (!cJSON_IsString(state)) {
@@ -773,6 +741,46 @@ void Application::InitializeProtocol() {
     });
 
     protocol_->Start();
+
+    if (!ota_->HasMqttConfig() && ota_->HasWebsocketConfig()) {
+        notify_channel_.Start();
+    }
+}
+
+void Application::HandleNotifyMessage(const cJSON* root) {
+    auto audio_url = cJSON_GetObjectItem(root, "audio_url");
+    if (!cJSON_IsString(audio_url) || audio_url->valuestring[0] == '\0') {
+        ESP_LOGW(TAG, "Notify message requires audio_url");
+        return;
+    }
+
+    std::vector<NotifySubtitle> subtitles;
+    auto subtitles_json = cJSON_GetObjectItem(root, "subtitles");
+    if (subtitles_json != nullptr && !cJSON_IsArray(subtitles_json)) {
+        ESP_LOGW(TAG, "Notify subtitles must be an array");
+        return;
+    }
+    if (cJSON_IsArray(subtitles_json)) {
+        cJSON* item = nullptr;
+        cJSON_ArrayForEach (item, subtitles_json) {
+            auto start_ms = cJSON_GetObjectItem(item, "start_ms");
+            auto text = cJSON_GetObjectItem(item, "text");
+            if (!cJSON_IsNumber(start_ms) || start_ms->valuedouble < 0 ||
+                start_ms->valuedouble > std::numeric_limits<uint32_t>::max() ||
+                !cJSON_IsString(text)) {
+                ESP_LOGW(TAG, "Ignoring invalid notify subtitle");
+                continue;
+            }
+            subtitles.push_back(
+                {.start_ms = static_cast<uint32_t>(start_ms->valuedouble),
+                 .text = ConvertToTraditionalForDisplay(text->valuestring)});
+        }
+    }
+
+    Schedule([this, url = std::string(audio_url->valuestring),
+              subtitles = std::move(subtitles)]() mutable {
+        StartNotification(std::move(url), std::move(subtitles));
+    });
 }
 
 void Application::ShowActivationCode(const std::string& code, const std::string& message) {
