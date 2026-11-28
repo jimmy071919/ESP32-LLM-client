@@ -4,10 +4,7 @@
 #include "emoji_collection.h"
 #include "text_glyph.h"
 
-#ifndef CONFIG_USE_EMOTE_MESSAGE_STYLE
-#define HAVE_LVGL 1
 #include <lvgl.h>
-#endif
 
 #include <esp_log.h>
 #include <esp_pm.h>
@@ -59,23 +56,6 @@ public:
     virtual bool IsMonochrome() const { return false; }
     virtual bool SupportsGuiOperations() const { return false; }
     virtual void SetHideSubtitle(bool hide) { (void)hide; }
-    virtual bool InsertAnimDialog(const char* name, uint32_t duration_ms) {
-        (void)name;
-        (void)duration_ms;
-        return false;
-    }
-    virtual bool MountAssets(const char* partition_label) {
-        (void)partition_label;
-        return false;
-    }
-    virtual void UnmountAssets() {}
-    virtual bool GetAssetData(const std::string& name, const uint8_t*& data, size_t& size) {
-        (void)name;
-        (void)data;
-        (void)size;
-        return false;
-    }
-    virtual void LoadAssets() {}
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image);
     virtual bool SetTextFont(std::shared_ptr<LvglFont> text_font) {
         (void)text_font;

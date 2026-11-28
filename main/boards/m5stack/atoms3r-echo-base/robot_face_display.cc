@@ -321,12 +321,12 @@ void RobotFaceDisplay::SetMotion(float x, float y, bool dizzy) {
     }
     motion_x_ += (std::clamp(x * 1.4f, -1.0f, 1.0f) - motion_x_) * 0.16f;
     motion_y_ += (std::clamp(y * 1.4f, -1.0f, 1.0f) - motion_y_) * 0.16f;
-    const int dx = static_cast<int>(std::round(motion_x_ * 33));
-    const int dy = static_cast<int>(std::round(motion_y_ * 27));
+    const int dx = static_cast<int>(std::round(motion_x_ * 13));
+    const int dy = static_cast<int>(std::round(motion_y_ * 12));
     lv_obj_set_style_translate_x(face_, dx, 0);
     lv_obj_set_style_translate_y(face_, dy, 0);
     for (int i = 0; i < 2; ++i) {
-        const int stretch = static_cast<int>(std::round(motion_x_ * (i == 0 ? -18 : 18)));
+        const int stretch = static_cast<int>(std::round(motion_x_ * (i == 0 ? -8 : 8)));
         lv_obj_set_style_translate_y(eye_dot_[i], stretch, 0);
         lv_obj_set_style_translate_y(eye_arc_[i], stretch, 0);
         for (auto eye : dizzy_eye_[i]) {

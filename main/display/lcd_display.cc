@@ -535,11 +535,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
     lv_label_set_text(emoji_label_, MATERIAL_SYMBOLS_ROBOT_2);
 }
-#if CONFIG_IDF_TARGET_ESP32P4
-#define MAX_MESSAGES 40
-#else
 #define MAX_MESSAGES 20
-#endif
 void LcdDisplay::SetChatMessage(const char* role, const char* content) {
     if (!setup_ui_called_) {
         ESP_LOGW(TAG, "SetChatMessage('%s', '%s') called before SetupUI() - message will be lost!",

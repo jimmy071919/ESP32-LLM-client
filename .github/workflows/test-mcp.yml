@@ -5,14 +5,12 @@ on:
     paths:
       - 'main/mcp_server.*'
       - 'main/cjson_utils.h'
-      - 'main/boards/common/press_to_talk_mcp_tool.*'
       - 'scripts/tests/test_mcp_server.py'
       - '.github/workflows/test-mcp.yml'
   pull_request:
     paths:
       - 'main/mcp_server.*'
       - 'main/cjson_utils.h'
-      - 'main/boards/common/press_to_talk_mcp_tool.*'
       - 'scripts/tests/test_mcp_server.py'
       - '.github/workflows/test-mcp.yml'
   workflow_dispatch:

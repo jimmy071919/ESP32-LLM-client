@@ -82,7 +82,6 @@ void McpServer::AddCommonTools() {
                 });
     }
 
-#ifdef HAVE_LVGL
     auto display = board.GetDisplay();
     if (display && display->GetTheme() != nullptr) {
         AddTool("self.screen.set_theme",
@@ -125,7 +124,6 @@ void McpServer::AddCommonTools() {
                     return std::move(*result);
                 });
     }
-#endif
 
     // Restore the original tools list to the end of the tools list
     tools_.insert(tools_.end(), std::make_move_iterator(original_tools.begin()),
@@ -175,7 +173,6 @@ void McpServer::AddUserOnlyTools() {
         });
 
     // Display control
-#ifdef HAVE_LVGL
     auto display = Board::GetInstance().GetDisplay();
     if (display != nullptr && display->SupportsGuiOperations()) {
         AddUserOnlyTool("self.screen.get_info",
@@ -323,7 +320,6 @@ void McpServer::AddUserOnlyTools() {
             });
 #endif  // CONFIG_LV_USE_SNAPSHOT
     }
-#endif  // HAVE_LVGL
 
     // Assets download url (always registered — Settings storage works regardless of partition
     // layout)

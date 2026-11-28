@@ -12,6 +12,7 @@
 #include <freertos/event_groups.h>
 #include <freertos/task.h>
 #include <model_path.h>
+#include <esp_wn_iface.h>
 #include "esp_ae_rate_cvt.h"
 #include "esp_audio_enc.h"
 #include "esp_audio_types.h"
@@ -80,8 +81,8 @@
     }
 
 struct AudioServiceCallbacks {
+    std::function<void(void)> on_wake_word;
     std::function<void(void)> on_send_queue_available;
-    std::function<void(const std::string&)> on_wake_word_detected;
     std::function<void(bool)> on_vad_change;
     std::function<void(void)> on_audio_testing_queue_full;
     // Fired when the decode/playback queues and their in-flight work are drained.
@@ -119,24 +120,15 @@ public:
     void Initialize(AudioCodec* codec);
     void Start();
     void Stop();
-    void EncodeWakeWord();
-    std::unique_ptr<AudioStreamPacket> PopWakeWordPacket();
-    const std::string& GetLastWakeWord() const;
-    std::vector<std::string> GetWakeWords() const;
     bool IsVoiceDetected() const { return voice_detected_; }
     bool IsIdle();
     bool IsPlaybackIdle();
-    bool IsWakeWordRunning() const {
-        return xEventGroupGetBits(event_group_) & AS_EVENT_WAKE_WORD_RUNNING;
-    }
     bool IsAudioProcessorRunning() const {
         return xEventGroupGetBits(event_group_) & AS_EVENT_AUDIO_PROCESSOR_RUNNING;
     }
-    bool IsAfeWakeWord();
 
-    void EnableWakeWordDetection(bool enable);
-    void ReleaseWakeWordResources();
     void EnableVoiceProcessing(bool enable);
+    void EnableWakeWord(bool enable);
     void EnableAudioTesting(bool enable);
     void EnableDeviceAec(bool enable);
 
@@ -148,6 +140,7 @@ public:
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
     void ResetDecoder();
     void SetModelsList(srmodel_list_t* models_list);
+    bool InitializeAudioEngine();
 
 private:
     AudioCodec* codec_ = nullptr;
@@ -172,6 +165,8 @@ private:
     DebugStatistics debug_statistics_;
     int64_t last_encode_drop_log_time_ = 0;
     srmodel_list_t* models_list_ = nullptr;
+    esp_wn_iface_t* wake_iface_ = nullptr;
+    model_iface_data_t* wake_data_ = nullptr;
 
     EventGroupHandle_t event_group_;
 
@@ -216,7 +211,6 @@ private:
     void AudioOutputTask();
     void OpusCodecTask();
     void PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm);
-    bool InitializeAudioEngine();
     void SetDecodeSampleRate(int sample_rate, int frame_duration);
     void CheckAndUpdateAudioPowerState();
     bool IsPlaybackDrainedLocked() const;

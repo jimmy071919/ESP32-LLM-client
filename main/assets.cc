@@ -4,9 +4,7 @@
 #include "cjson_utils.h"
 #include "display.h"
 #include "lvgl_theme.h"
-#if HAVE_LVGL
 #include <spi_flash_mmap.h>
-#endif
 
 #include <esp_heap_caps.h>
 #include <esp_log.h>
@@ -29,11 +27,7 @@ struct mmap_assets_table {
 
 Assets::Assets() {
     UseBuiltInTextFontCapability();
-#if HAVE_LVGL
     strategy_ = std::make_unique<Assets::LvglStrategy>();
-#else
-    strategy_ = std::make_unique<Assets::EmoteStrategy>();
-#endif
     // Initialize the partition
     InitializePartition();
 }
@@ -66,7 +60,6 @@ void Assets::UnApplyPartition() {
 }
 
 void Assets::UseBuiltInTextFontCapability() {
-#if HAVE_LVGL
     text_font_capability_ = {
         .glyph_push = true,
         .bundle = NOTO_FONT_BUNDLE_ID,
@@ -74,11 +67,6 @@ void Assets::UseBuiltInTextFontCapability() {
         .size = TEXT_FONT_SIZE,
         .bpp = TEXT_FONT_BPP,
     };
-#else
-    // Emote does not consume pushed glyphs; advertising charset=basic makes
-    // the server embed a bitmap for every CJK character and inflates MQTT.
-    text_font_capability_ = {};
-#endif
 }
 
 void Assets::DisableTextFontGlyphPush() { text_font_capability_ = {}; }
@@ -137,7 +125,6 @@ bool Assets::LoadSrmodelsFromIndex(Assets* assets, cJSON* root) {
     return false;
 }
 
-#if HAVE_LVGL
 uint32_t Assets::LvglStrategy::CalculateChecksum(const char* data, uint32_t length) {
     uint32_t checksum = 0;
     for (uint32_t i = 0; i < length; i++) {
@@ -434,61 +421,6 @@ bool Assets::LvglStrategy::Apply(Assets* assets, bool refresh_display_theme) {
         }
     }
 
-    return true;
-}
-#endif  // HAVE_LVGL
-
-bool Assets::EmoteStrategy::InitializePartition(Assets* assets) {
-    assets->DisableTextFontGlyphPush();
-    assets->partition_valid_ = false;
-
-    if (!Assets::FindPartition(assets)) {
-        return false;
-    }
-
-    auto display = Board::GetInstance().GetDisplay();
-    if (display == nullptr || !display->MountAssets(PARTITION_LABEL)) {
-        ESP_LOGE(TAG, "Emote display is not initialized");
-        return false;
-    }
-    assets->partition_valid_ = true;
-    return assets->partition_valid_;
-}
-
-void Assets::EmoteStrategy::UnApplyPartition(Assets* assets) {
-    auto display = Board::GetInstance().GetDisplay();
-    if (display != nullptr) {
-        display->UnmountAssets();
-    }
-    (void)assets;  // Unused parameter
-}
-
-bool Assets::EmoteStrategy::GetAssetData(Assets* assets, const std::string& name, void*& ptr,
-                                         size_t& size) {
-    auto display = Board::GetInstance().GetDisplay();
-    if (display != nullptr) {
-        const uint8_t* data = nullptr;
-        size_t data_size = 0;
-        if (display->GetAssetData(name, data, data_size)) {
-            ptr = const_cast<void*>(static_cast<const void*>(data));
-            size = data_size;
-            return true;
-        }
-        ESP_LOGE(TAG, "Failed to get asset data by name: %s", name.c_str());
-        return false;
-    }
-    (void)assets;  // Unused parameter
-    return false;
-}
-
-bool Assets::EmoteStrategy::Apply(Assets* assets, bool refresh_display_theme) {
-    assets->DisableTextFontGlyphPush();
-    Assets::LoadSrmodelsFromIndex(assets);
-
-    auto display = Board::GetInstance().GetDisplay();
-    if (display != nullptr) {
-        display->LoadAssets();
-    }
     return true;
 }
 
